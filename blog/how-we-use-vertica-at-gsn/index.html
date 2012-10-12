@@ -13,6 +13,7 @@
     <![endif]-->
 	<style>
 		.highlight { background-color: #ffff99; }
+		.signature { text-align: right; font-weight: italic; border-top: dashed 1px #dcdcdc; padding-top: 1em; margin-left: 15%;}
 	</style>
   </head>
   <body>
@@ -29,7 +30,7 @@
         <h2>How we use Vertica at GSN</h2>
 
 		<p>
-At <a href="http://www.gsngames.com">GSN Games</a>, we’re obsessed with two things: <strong>measuring data </strong> and <strong>moving fast</strong>.  We try to take new ideas from conception to production in 2 days.  So traditional data warehousing solutions &mdash; you know, the ones that <a href="http://www.sas.com/" title="Just kidding, SAS. I love you.">take 6 months to implement</a> &mdash; would never work for us. 		
+At <a href="http://www.gsngames.com">GSN Games</a>, we’re obsessed with two things: <strong>measuring data </strong> and <strong>moving fast</strong>.  We try to take new ideas from conception to production in 2 days.  Traditional data warehousing solutions &mdash; you know, the ones that <a href="http://www.sas.com/" title="Just kidding, SAS. I love you.">take 6 months to implement</a> &mdash; would never work for us. 		
 		</p>
 		<p>
 So here’s how we use <a href="http://www.vertica.com"><strong>Vertica and SQL</strong></a> to collect data and still move quickly.		
@@ -43,13 +44,13 @@ So here’s how we use <a href="http://www.vertica.com"><strong>Vertica and SQL<
 			<li><code>event_time</code></li>
 			<li><code>game_id</code></li>
 		</ul>
-		<p>The next 120 columns look a little odd:</p>
+		<p>The next 60 columns look a little odd:</p>
 		<ul>
 			<li><code>attr1</code></li>
 			<li><code>attr2</code></li>
 			<li><code>attr3</code></li>
 			<li>...</li>
-			<li><code>attr120</code></li>
+			<li><code>attr60</code></li>
 		</ul>
 		<p>
 			<blockquote>
@@ -64,7 +65,7 @@ So here’s how we use <a href="http://www.vertica.com"><strong>Vertica and SQL<
 		<p>
 		As was I when I initially saw this design. You'll come around. 
 		</p>
-		<p>The first 20 columns are for <code>integer</code>s, the next 20 for <code>float</code>s, the next 20 for <code>boolean</code>s, then next 20 for <code>timestamp</code>s, and the last 40 are for <code>string</code>s. 
+		<p>The first 10 columns are for <code>integer</code>s, the next 10 for <code>float</code>s, the next 10 for <code>boolean</code>s, then next 10 for <code>timestamp</code>s, and the last 20 are for <code>string</code>s. 
 		</p>
 		<p>
 		<code>event_type_id</code> is a <a href="https://www.google.com/search?q=discriminator+column">“discriminator column”</a>: it tells us what <em>kind</em> of data is in each column in that row. 
@@ -93,7 +94,7 @@ So here’s how we use <a href="http://www.vertica.com"><strong>Vertica and SQL<
 		<p>
 		The log files rollover every 10MB, at which point they are uploaded to S3 for ingestion by the data warehouse.
 		</p>
-		<p>Every 15 minutes, the data warehouse downloads all the log files from S3, and uses the Vertica <code>copy</code> copy command to write them to the <code>events</code> table.
+		<p>Every 15 minutes, the data warehouse downloads all the log files from S3, and uses the Vertica <code>copy</code> command to write them to the <code>events</code> table.
 		</p>
 		<p>
 		<em>Et voilà!</em> An engineer has successfully started logging new data into Vertica, and I didn't have to do anything.
@@ -104,8 +105,48 @@ So here’s how we use <a href="http://www.vertica.com"><strong>Vertica and SQL<
 		
 		<h3>Getting information out...</h3>
 		<p>
+		We're heavy users of SQL for ad-hoc analysis. Standardized reports are great, but you can't possibly anticipate everyone's questions in advance. 
+		</p>
+		<p>Even though the <code>events</code> table currently has <span class="highlight">close to 100 billion records</span>, query operations are still blazingly fast. Here's a recent example:</p>
+		<p>A developer (let's call him <a href="http://www.gsngames.com/staff/eric/">"Shmeric"</a>) recently added a sweepstakes to our Facebook app <a href="http://apps.facebook.com/mesmogames/?fb_source=blog&ref=blog">Games by GSN</a>. Every 24 hours, we give away a ton of tokens, and users can fill out a sweepstakes card to gain entry. He created a new <code>event_type_id</code> of 137 and decided to store the timestamp of the upcoming drawing in the <code>attr31</code> column. </p>
+		<p>He then asked: "do users submit more entries as the nightly drawing gets closer?". He expected that the number of entries per hour would be low when there were 24 hours until the next drawing, then steadily increase as the drawing got closer and closer. Here's the query:</p>
+		<pre><code>
+select 
+  hr as "Hours Until Drawing",
+  1.0*cumulative/first_value(cumulative) over(order by hr desc) as "Cumulative Percent",
+  1.0*entered/first_value(cumulative) over(order by hr desc) as "Hourly Percent" 
+from (
+  select 
+    datediff('hour',attr31,event_time) as hr,
+    count(distinct fb_user_id) as entered,
+    sum(count(distinct fb_user_id)) over (order by datediff('hour',attr31,event_time) asc) as cumulative
+  from newapi.events 
+  where event_type_id=137
+  and datediff('hour',attr31,event_time) between -24 and -1
+  and event_time between '2012-10-10' and date_trunc('day',sysdate)
+  group by 1
+) z
+order by 1 asc
+		</pre></code>
 		
-	  
+		
+		<p><blockquote>“You know that query could be optimized if you&mdash;”</blockquote></p>
+		
+		<p>I'm sure it could, but it ran in 300ms, so I don't particularly care.</p>
+		<pre><code>Time: First fetch (24 rows): 314.714 ms. All rows formatted: 314.791 ms</code></pre>
+		<p>Here's the output using the R <code>plot</code> function:</p>
+		<p><a href="rplot.PNG"><img src="rplot.PNG"/></a></p>
+		<p>Interestingly, it turned out that the relationship was actually <strong>the opposite of what was predicted</strong>: the number of entries goes down as the drawing approaches (bottom left cell of the plot). Our team is currently at work tweaking the messaging to make it more clear to users who the sweepstakes works. </p>
+		
+		<h3>Wrapping up</h3>
+		<p>So in the above example, a developer built a feature, launched it, and measured it without requiring any new tables or load scripts. </p>
+		<p>Although the single table approach is unorthodox (and smells funny when you first encounter it), it has a number of advantages. </p>
+		<p>To be clear: this would never work in a traditional RDBMS. (What columns would you index? All of them?) But with Vertica, a query against tens of billions of records can return in under a second. Columnar databases rule.</p> 
+		
+		<p class="signature">
+		<strong>Portman Wills</strong> leads the BI &amp; Analytics team at GSN Digital. <br/>
+		He's always ready to talk about Vertica, data science, or last night's episode of The League. Drop him a line at <strong>pwills@gsn.com</strong>, <a href="http://www.linkedin.com/in/portmanwills">connect on LinkedIn</a>, or check out all of the <a href="http://www.gsngames.com/jobs/">current positions</a> open at GSN.<br/>
+		</p>
 	  </section>
 	  <footer>
         <p><small>Hosted on GitHub Pages &mdash; Theme by <a href="https://github.com/orderedlist">orderedlist</a></small></p>
