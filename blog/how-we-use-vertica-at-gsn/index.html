@@ -54,7 +54,7 @@ So here’s how we use <a href="http://www.vertica.com"><strong>Vertica and SQL<
 		</ul>
 		<p>
 			<blockquote>
-			“Wait, that’s the kind of database that Dilbert’s boss would create! YOU’RE DOING IT WRONG!”</blockquote>
+			“Wait, that’s the kind of database that Dilbert’s pointy-haired boss would create! YOU’RE DOING IT WRONG!”</blockquote>
 		</p>
 		<p>Please hold all of your nerdrage until the end of this article.</p>
 		<p>
@@ -75,6 +75,7 @@ So here’s how we use <a href="http://www.vertica.com"><strong>Vertica and SQL<
 		<p>
 		So for the <code>PAYMENT_RECEIVED</code> event, <code>attr1</code> stores the amount of money the user paid us, but for the <code>TOKENS_ADJUSTED</code> event, <code>attr1</code> stores the number of tokens won or lost in a game.
 		</p>
+		<p>Note in the above screenshot how sparse the columns are. Most cells are unused (and therefore NULL). This would have terrible performance implications in a traditional, row-oriented database. But a column-oriented has no problem with sparse columns.</p>
 		<p>
 		We use this Google doc to easily <span class="highlight">generate SQL views for each event type</span>. So to the casual observer, it looks like a normal RDBMS, with one table for each event, but under the hood it's one table to rule them all, forged by Sauron.
 		</p>
@@ -95,6 +96,7 @@ So here’s how we use <a href="http://www.vertica.com"><strong>Vertica and SQL<
 		The log files rollover every 10MB, at which point they are uploaded to S3 for ingestion by the data warehouse.
 		</p>
 		<p>Every 15 minutes, the data warehouse downloads all the log files from S3, and uses the Vertica <code>copy</code> command to write them to the <code>events</code> table.
+		A typical load will add 5,000,000 rows to the table, which usually takes about 45 seconds to complete.
 		</p>
 		<p>
 		<em>Et voilà!</em> An engineer has successfully started logging new data into Vertica, and I didn't have to do anything.
